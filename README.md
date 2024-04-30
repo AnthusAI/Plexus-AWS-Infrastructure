@@ -1,7 +1,13 @@
 
-# Welcome to your CDK Python project!
+# Plexus AWS Infrastructure
 
-This is a blank project for CDK development with Python.
+This CDK stack will create a data lake using AWS S3, Glue and Athena.
+
+You can then take the S3 bucket name and Glue crawler name and use that from any other project (like a private project for doing data mining from a client's proprietary database) to write new labeled samples into the data lake and then re-crawl it.
+
+Give that S3 bucket name to Plexus in the `config.yaml` for your project that uses Plexus to tell it to use that data lake for things like `plexus data analyze`.
+
+## From `cdk init`:
 
 The `cdk.json` file tells the CDK Toolkit how to execute your app.
 
