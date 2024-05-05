@@ -16,19 +16,24 @@ class PlexusAwsInfrastructureStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         # Define a bucket prefix
-        bucket_prefix = "plexus-training-data-lake"
-
-        # Generate a unique hash to use as a suffix
-        unique_suffix = hashlib.sha256(os.urandom(16)).hexdigest()[:6]
-
-        # Combine the prefix and the generated unique suffix
-        bucket_name = f"{bucket_prefix}-{unique_suffix}"
+        bucket_name = "plexus-training-data-lake"
 
         # Create an S3 bucket for storing data
         data_lake_bucket = s3.Bucket(self, "Plexus-Training-Data-Lake",
             bucket_name = bucket_name,
             versioned=True,
-            removal_policy=RemovalPolicy.DESTROY)
+            removal_policy=RemovalPolicy.RETAIN)
+        
+        # Create an S3 bucket for Athena query results
+        athena_results_bucket = s3.Bucket(self, "Plexus-Training-Data-Lake-Athena-Results-Bucket",
+            bucket_name=f"{bucket_name}-query-results",
+            removal_policy=RemovalPolicy.DESTROY,
+            versioned=True)
+
+        # Output the Athena results bucket name
+        CfnOutput(self, "AthenaResultsBucketName",
+            value=athena_results_bucket.bucket_name,
+            description="S3 bucket for Athena query results.")
 
         # Create an IAM role for Glue Crawler
         glue_role = iam.Role(self, "GlueCrawlerRole",
@@ -41,8 +46,12 @@ class PlexusAwsInfrastructureStack(Stack):
             resources=["*"]
         ))
         glue_role.add_to_policy(iam.PolicyStatement(
-            actions=["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
-            resources=[data_lake_bucket.arn_for_objects("*")]
+            actions=["s3:*"],
+            resources=["*"]
+        ))
+        glue_role.add_to_policy(iam.PolicyStatement(
+            actions=["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+            resources=[f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws-glue/crawlers:log-stream:*"]
         ))
 
         # Create a Glue database for the data lake using CfnDatabase
@@ -53,16 +62,23 @@ class PlexusAwsInfrastructureStack(Stack):
                 description="Database for Plexus data lake"))
 
         # Define the S3 paths for the Glue Crawler
-        crawler_s3_target_paths = [f"s3://{data_lake_bucket.bucket_name}"]
+        crawler_s3_target_paths = [f"s3://{bucket_name}/"]
 
-        # Create a Glue Crawler to populate the Glue Data Catalog
+        # Create a Glue Crawler for JSON data
         data_lake_crawler = glue.CfnCrawler(self, "PlexusTrainingDataLakeCrawler",
             role=glue_role.role_arn,
             database_name=glue_database.ref,
-            targets={"s3Targets": [{"path": path} for path in crawler_s3_target_paths]},
-            name="PlexusTrainingDataLakeCrawler")
+            targets=glue.CfnCrawler.TargetsProperty(
+                s3_targets=[
+                    glue.CfnCrawler.S3TargetProperty(
+                        path=crawler_s3_target_paths[0],
+                        exclusions=["**/[!m]etadata.json"],
+                    )
+                ]
+            ),
+            name="PlexusTrainingDataLakeCrawler"
+        )
 
-        # Optionally, you can create outputs for resources you might need to access or reference externally
         CfnOutput(self, "BucketName",
             value=data_lake_bucket.bucket_name,
             description="Name of the S3 bucket used for the data lake.")
